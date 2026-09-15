@@ -57,9 +57,59 @@ main(int argc, char *argv[])
   exit(0);
 }
 
+  // Your code here.  `data` holds `len` valid bytes.
 void
 memdump(char *fmt, char *data, int len)
 {
-  // Your code here.  `data` holds `len` valid bytes.
+  int off = 0;
+  for(int f = 0; fmt[f]; f++){
+    char t = fmt[f];
+    int need;
+    if(t == 'i') need = 4;
+    else if(t == 'p') need = 8;
+    else if(t == 's') need = 8;
+    else if(t == 'h') need = 2;
+    else if(t == 'c') need = 1;
+    else if(t == 'S') need = 0;
+    else continue;
 
+    if(t != 'S' && off + need > len){
+      printf("memdump: not enough data for '%c'\n", t);
+      return;
+    }
+
+    if(t == 'i'){
+      uint x = 0;
+      for(int k = 0; k < 4; k++)
+        x |= (uint)(uchar)data[off+k] << (8*k);
+      printf("%d\n", (int)x);
+      off += 4;
+    } else if(t == 'h'){
+      ushort x = 0;
+      for(int k = 0; k < 2; k++)
+        x |= (ushort)((uchar)data[off+k]) << (8*k);
+      printf("%d\n", (int)x);
+      off += 2;
+    } else if(t == 'c'){
+      printf("%c\n", data[off]);
+      off += 1;
+    } else if(t == 'p'){
+      uint64 x = 0;
+      for(int k = 0; k < 8; k++)
+        x |= (uint64)(uchar)data[off+k] << (8*k);
+      printf("%lx\n", x);
+      off += 8;
+    } else if(t == 's'){
+      uint64 x = 0;
+      for(int k = 0; k < 8; k++)
+        x |= (uint64)(uchar)data[off+k] << (8*k);
+      printf("%s\n", (char*)x);
+      off += 8;
+    } else if(t == 'S'){
+      for(; off < len && data[off] != 0; off++)
+        printf("%c", data[off]);
+      printf("\n");
+      off = len;
+    }
+  }
 }
