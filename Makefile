@@ -206,8 +206,7 @@ UPROGS=\
 	$U/_dorphan\
 	$U/_sync\
 	$U/_sleep\
-
-
+	$U/_uptime\
 
 ifeq ($(LAB),syscall)
 UPROGS += \
