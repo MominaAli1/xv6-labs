@@ -241,6 +241,42 @@ $U/_uthread: $U/uthread.o $U/uthread_switch.o $(ULIB)
 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $U/_uthread $U/uthread.o $U/uthread_switch.o $(ULIB)
 	$(OBJDUMP) -S $U/_uthread > $U/uthread.asm
 
+
+
+
+ifeq ($(LAB),syscall)
+UPROGS += \
+	$U/_attack\
+	$U/_secret
+endif
+
+ifeq ($(LAB),traps)
+UPROGS += \
+	$U/_call\
+	$U/_bttest
+endif
+
+ifeq ($(LAB),lazy)
+UPROGS += \
+	$U/_lazytests
+endif
+
+ifeq ($(LAB),cow)
+UPROGS += \
+	$U/_cowtest
+endif
+
+ifeq ($(LAB),thread)
+UPROGS += \
+	$U/_uthread
+
+$U/uthread_switch.o : $U/uthread_switch.S
+	$(CC) $(CFLAGS) -c -o $U/uthread_switch.o $U/uthread_switch.S
+
+$U/_uthread: $U/uthread.o $U/uthread_switch.o $(ULIB)
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $U/_uthread $U/uthread.o $U/uthread_switch.o $(ULIB)
+	$(OBJDUMP) -S $U/_uthread > $U/uthread.asm
+
 ph: notxv6/ph.c
 	gcc -o ph -g -O2 $(XCFLAGS) notxv6/ph.c -pthread
 
