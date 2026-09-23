@@ -207,6 +207,8 @@ UPROGS=\
 	$U/_sync\
 	$U/_sleep\
 	$U/_uptime\
+	$U/_sandbox\
+	$U/_sbtest\
 
 ifeq ($(LAB),syscall)
 UPROGS += \
@@ -240,7 +242,7 @@ $U/uthread_switch.o : $U/uthread_switch.S
 $U/_uthread: $U/uthread.o $U/uthread_switch.o $(ULIB)
 	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $U/_uthread $U/uthread.o $U/uthread_switch.o $(ULIB)
 	$(OBJDUMP) -S $U/_uthread > $U/uthread.asm
-
+endif
 
 
 

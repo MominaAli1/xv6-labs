@@ -288,6 +288,8 @@ kfork(void)
   np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
+  np->interpose_mask = p->interpose_mask;
+  safestrcpy(np->interpose_path, p->interpose_path, MAXPATH);
 
   pid = np->pid;
 
