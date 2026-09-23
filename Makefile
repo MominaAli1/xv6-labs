@@ -209,6 +209,7 @@ UPROGS=\
 	$U/_uptime\
 	$U/_sandbox\
 	$U/_sbtest\
+	$U/_freememtest\
 
 ifeq ($(LAB),syscall)
 UPROGS += \
