@@ -101,5 +101,6 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];  
-  int interpose_mask;              // syscalls this process is sandboxed from             // Process name (debugging)
+  int interpose_mask;     
+  char interpose_path[MAXPATH];   // the one path open/exec may still use         // syscalls this process is sandboxed from             // Process name (debugging)
 };

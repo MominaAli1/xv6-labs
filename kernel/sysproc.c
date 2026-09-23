@@ -114,7 +114,18 @@ uint64
 sys_interpose(void)
 {
   int mask;
+  char path[MAXPATH];
+  struct proc *p = myproc();
+
   argint(0, &mask);
-  myproc()->interpose_mask = mask;
+  if (argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  // once sandboxed, a process cannot weaken its own restrictions
+  if (p->interpose_mask != 0)
+    return -1;
+
+  p->interpose_mask = mask;
+  safestrcpy(p->interpose_path, path, MAXPATH);
   return 0;
 }

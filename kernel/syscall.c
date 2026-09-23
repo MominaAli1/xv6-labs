@@ -143,9 +143,20 @@ syscall(void)
 
   num = p->trapframe->a7;
   if (num > 0 && num < NELEM(syscalls) && syscalls[num]) {
-    if (p->interpose_mask & (1 << num)) {
-      p->trapframe->a0 = -1;
-      return;
+        if (p->interpose_mask & (1 << num)) {
+      int allowed = 0;
+      if (num == SYS_open || num == SYS_exec) {
+        char path[MAXPATH];
+        if (argstr(0, path, MAXPATH) >= 0 &&
+            strncmp(path, p->interpose_path, MAXPATH) == 0) {
+          allowed = 1;
+        }
+      }
+      if (!allowed) {
+        p->trapframe->a0 = -1;
+        return;
+      }
+    
     }
     p->trapframe->a0 = syscalls[num]();
   } else {
