@@ -6,6 +6,9 @@
 #include "proc.h"
 #include "syscall.h"
 #include "defs.h"
+#include "fs.h"
+#include "sleeplock.h"
+#include "file.h"
 
 // Fetch the uint64 at addr from the current process.
 int
@@ -103,6 +106,23 @@ extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
 extern uint64 sys_sync(void);
+
+#ifdef LAB_NET
+extern uint64 sys_bind(void);
+extern uint64 sys_unbind(void);
+extern uint64 sys_send(void);
+extern uint64 sys_recv(void);
+#endif
+#ifdef LAB_PGTBL
+extern uint64 sys_pgpte(void);
+extern uint64 sys_vmprint(void);
+extern uint64 sys_pgaccess(void);
+extern uint64 sys_ksupernpte(void);
+#endif
+#ifdef LAB_LOCK
+extern uint64 sys_cpupin(void);
+#endif
+
 extern uint64 sys_freemem(void);
 extern uint64 sys_interpose(void);
 // An array mapping syscall numbers from syscall.h
@@ -131,10 +151,27 @@ static uint64 (*syscalls[])(void) = {
   [SYS_mkdir]   = sys_mkdir,
   [SYS_close]   = sys_close,
   [SYS_sync]    = sys_sync,
+#ifdef LAB_NET
+  [SYS_bind] = sys_bind,
+  [SYS_unbind] = sys_unbind,
+  [SYS_send] = sys_send,
+  [SYS_recv] = sys_recv,
+#endif
+#ifdef LAB_PGTBL
+  [SYS_pgpte] = sys_pgpte,
+  [SYS_vmprint] = sys_vmprint,
+  [SYS_pgaccess] = sys_pgaccess,
+  [SYS_ksupernpte] = sys_ksupernpte,
+#endif
+#ifdef LAB_LOCK
+  [SYS_rwlktest] = sys_rwlktest,
+  [SYS_cpupin] = sys_cpupin,
+#endif
   [SYS_interpose] = sys_interpose,
 [SYS_freemem] = sys_freemem,
   // clang-format on
 };
+
 
 void
 syscall(void)
