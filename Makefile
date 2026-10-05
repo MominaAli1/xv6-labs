@@ -188,7 +188,9 @@ mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 .PRECIOUS: %.o
 
 UPROGS=\
+	$U/_find\
 	$U/_cat\
+	$U/_sixfive\
 	$U/_echo\
 	$U/_forktest\
 	$U/_grep\
@@ -208,7 +210,45 @@ UPROGS=\
 	$U/_forphan\
 	$U/_dorphan\
 	$U/_sync\
+	$U/_sleep\
+	$U/_uptime\
+	$U/_sandbox\
+	$U/_sbtest\
+	$U/_freememtest\
 
+ifeq ($(LAB),syscall)
+UPROGS += \
+	$U/_attack\
+	$U/_secret
+endif
+
+ifeq ($(LAB),traps)
+UPROGS += \
+	$U/_call\
+	$U/_bttest
+endif
+
+ifeq ($(LAB),lazy)
+UPROGS += \
+	$U/_lazytests
+endif
+
+ifeq ($(LAB),cow)
+UPROGS += \
+	$U/_cowtest
+endif
+
+ifeq ($(LAB),thread)
+UPROGS += \
+	$U/_uthread
+
+$U/uthread_switch.o : $U/uthread_switch.S
+	$(CC) $(CFLAGS) -c -o $U/uthread_switch.o $U/uthread_switch.S
+
+$U/_uthread: $U/uthread.o $U/uthread_switch.o $(ULIB)
+	$(LD) $(LDFLAGS) -N -e main -Ttext 0 -o $U/_uthread $U/uthread.o $U/uthread_switch.o $(ULIB)
+	$(OBJDUMP) -S $U/_uthread > $U/uthread.asm
+endif
 
 
 

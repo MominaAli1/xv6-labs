@@ -47,6 +47,8 @@ int ksupernpte(uint64*, uint64 *);
 int rwlktest(int resetflag);
 int cpupin(int);
 #endif
+int freemem(void);
+int interpose(int, const char *);
 
 // ulib.c
 int stat(const char *, struct stat *);
