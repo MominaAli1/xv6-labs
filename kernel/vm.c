@@ -148,13 +148,117 @@ walkaddr(pagetable_t pagetable, uint64 va)
 
 
 #if defined(LAB_PGTBL) || defined(SOL_MMAP) || defined(SOL_COW)
+// Recursively print the valid PTEs in one page-table page.
+// level is 2 for the root, 1 for the middle, 0 for the bottom.
+// va_base is the virtual address covered by entry 0 of this page.
+static void
+vmprint_level(pagetable_t pagetable, int level, uint64 va_base)
+{
+  for (int i = 0; i < 512; i++) {
+    pte_t pte = pagetable[i];
+    if ((pte & PTE_V) == 0)
+      continue;
+
+    uint64 va = va_base + ((uint64)i << PXSHIFT(level));
+    uint64 pa = PTE2PA(pte);
+
+    // depth 1 for the root level, 2 for the middle, 3 for the bottom.
+    for (int d = 2; d >= level; d--)
+      printk(" ..");
+    printk("%p: pte %p pa %p ", (void *)va, (void *)pte, (void *)pa);
+    if (pte & PTE_R)
+      printk("R");
+    if (pte & PTE_W)
+      printk("W");
+    if (pte & PTE_X)
+      printk("X");
+    if (pte & PTE_U)
+      printk("U");
+    if (level > 0 && PTE_LEAF(pte))
+      printk(" SUPERPAGE");
+    printk("\n");
+
+    // a valid PTE above the bottom level without R/W/X points
+    // to the next-lower page-table page.
+    if (level > 0 && !PTE_LEAF(pte))
+      vmprint_level((pagetable_t)pa, level - 1, va);
+  }
+}
+
 void
 vmprint(pagetable_t pagetable)
 {
-  // your code here
+  printk("page table %p\n", pagetable);
+  vmprint_level(pagetable, 2, 0);
 }
 #endif
 
+
+#ifdef LAB_PGTBL
+// Return the address of the level-1 PTE for va (the PTE that
+// maps a 2MB superpage), allocating the level-1 page-table
+// page if alloc != 0.
+static pte_t *
+superwalk(pagetable_t pagetable, uint64 va, int alloc)
+{
+  if (va >= MAXVA)
+    panic("superwalk");
+
+  pte_t *pte = &pagetable[PX(2, va)];
+  if (*pte & PTE_V) {
+    if (PTE_LEAF(*pte))
+      panic("superwalk: 1GB page");
+    pagetable = (pagetable_t)PTE2PA(*pte);
+  } else {
+    if (!alloc || (pagetable = (pde_t *)kalloc()) == 0)
+      return 0;
+    memset(pagetable, 0, PGSIZE);
+    *pte = PA2PTE(pagetable) | PTE_V;
+  }
+  return &pagetable[PX(1, va)];
+}
+
+// Kernel-only version of mappages(): wherever va and pa are both
+// 2MB-aligned and at least 2MB remain, map a superpage with one
+// level-1 PTE; otherwise map an ordinary 4KB page.
+static int
+kmappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
+{
+  uint64 a, end;
+  pte_t *pte;
+
+  if ((va % PGSIZE) != 0)
+    panic("kmappages: va not aligned");
+  if ((size % PGSIZE) != 0)
+    panic("kmappages: size not aligned");
+  if (size == 0)
+    panic("kmappages: size");
+
+  a = va;
+  end = va + size;
+  while (a < end) {
+    if ((a % SUPERPGSIZE) == 0 && (pa % SUPERPGSIZE) == 0 &&
+        end - a >= SUPERPGSIZE) {
+      if ((pte = superwalk(pagetable, a, 1)) == 0)
+        return -1;
+      if (*pte & PTE_V)
+        panic("kmappages: remap");
+      *pte = PA2PTE(pa) | perm | PTE_V;
+      a += SUPERPGSIZE;
+      pa += SUPERPGSIZE;
+    } else {
+      if ((pte = walk(pagetable, a, 1)) == 0)
+        return -1;
+      if (*pte & PTE_V)
+        panic("kmappages: remap");
+      *pte = PA2PTE(pa) | perm | PTE_V;
+      a += PGSIZE;
+      pa += PGSIZE;
+    }
+  }
+  return 0;
+}
+#endif
 
 // add a mapping to the kernel page table.
 // only used when booting.
@@ -162,8 +266,13 @@ vmprint(pagetable_t pagetable)
 void
 kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 {
+#ifdef LAB_PGTBL
+  if (kmappages(kpgtbl, va, sz, pa, perm) != 0)
+    panic("kvmmap");
+#else
   if (mappages(kpgtbl, va, sz, pa, perm) != 0)
     panic("kvmmap");
+#endif
 }
 
 // Create PTEs for virtual addresses starting at va that refer to
