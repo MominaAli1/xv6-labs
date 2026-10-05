@@ -107,10 +107,43 @@ sys_vmprint(void)
 #endif
 
 #ifdef LAB_PGTBL
+#define PGACCESS_MAX 4096 // max pages one pgaccess() call may scan
+
 int
 sys_pgaccess(void)
 {
-  // lab pgtbl: your code here.
+  uint64 base, mask;
+  int len;
+  struct proc *p = myproc();
+  unsigned char bits[PGACCESS_MAX / 8];
+
+  argaddr(0, &base);
+  argint(1, &len);
+  argaddr(2, &mask);
+
+  if (len <= 0 || len > PGACCESS_MAX)
+    return -1;
+
+  base = PGROUNDDOWN(base);
+  // the whole range must lie inside the process's memory.
+  if (base >= p->sz || base + (uint64)len * PGSIZE > p->sz)
+    return -1;
+
+  int nbytes = (len + 7) / 8;
+  memset(bits, 0, nbytes);
+
+  for (int i = 0; i < len; i++) {
+    pte_t *pte = walk(p->pagetable, base + (uint64)i * PGSIZE, 0);
+    if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
+      return -1; // page not mapped
+    if (*pte & PTE_A) {
+      bits[i / 8] |= (1 << (i % 8));
+      *pte &= ~PTE_A; // clear, so the next call sees only new accesses
+    }
+  }
+
+  if (copyout(p->pagetable, p->sz, mask, (char *)bits, nbytes) < 0)
+    return -1;
   return 0;
 }
 #endif
