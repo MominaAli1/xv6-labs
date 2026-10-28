@@ -43,6 +43,8 @@ entry("sbrk");
 entry("pause");
 entry("uptime");
 entry("sync");
+entry("sigalarm");
+entry("sigreturn");
 entry("bind");
 entry("unbind");
 entry("send");

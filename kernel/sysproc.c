@@ -73,6 +73,7 @@ sys_pause(void)
   int n;
   uint ticks0;
 
+  backtrace();
 
   argint(0, &n);
   if (n < 0)
@@ -170,6 +171,32 @@ sys_uptime(void)
   return xticks;
 }
 
+uint64
+sys_sigalarm(void)
+{
+  struct proc *p = myproc();
+  int interval;
+  uint64 handler;
+
+  argint(0, &interval);
+  argaddr(1, &handler);
+  p->alarm_interval = interval;
+  p->alarm_handler = handler;
+  p->alarm_ticks = 0;
+  return 0;
+}
+
+uint64
+sys_sigreturn(void)
+{
+  struct proc *p = myproc();
+
+  *p->trapframe = p->alarm_trapframe;
+  p->alarm_running = 0;
+  // syscall() stores our return value in a0,
+  // so return the interrupted code's a0.
+  return p->trapframe->a0;
+}
 #ifdef LAB_LOCK
 uint64
 sys_cpupin(void)
