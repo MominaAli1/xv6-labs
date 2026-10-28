@@ -1,10 +1,13 @@
 #include "types.h"
 #include "riscv.h"
-#include "defs.h"
 #include "param.h"
+#include "defs.h"
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#ifdef PGTBL_SOL
+#include "riscv.h"
+#endif
 #include "vm.h"
 
 uint64
@@ -57,7 +60,7 @@ sys_sbrk(void)
     // memory, vmfault() will allocate it.
     if (addr + n < addr)
       return -1;
-    if (addr + n > TRAPFRAME)
+    if (addr + n > UTOP)
       return -1;
     myproc()->sz += n;
   }
@@ -90,6 +93,61 @@ sys_pause(void)
   release(&tickslock);
   return 0;
 }
+
+
+#ifdef LAB_PGTBL
+int
+sys_vmprint(void)
+{
+  struct proc *p;
+
+  p = myproc();
+  vmprint(p->pagetable);
+  return 0;
+}
+#endif
+
+#ifdef LAB_PGTBL
+#define PGACCESS_MAX 4096 // max pages one pgaccess() call may scan
+
+int
+sys_pgaccess(void)
+{
+  uint64 base, mask;
+  int len;
+  struct proc *p = myproc();
+  unsigned char bits[PGACCESS_MAX / 8];
+
+  argaddr(0, &base);
+  argint(1, &len);
+  argaddr(2, &mask);
+
+  if (len <= 0 || len > PGACCESS_MAX)
+    return -1;
+
+  base = PGROUNDDOWN(base);
+  // the whole range must lie inside the process's memory.
+  if (base >= p->sz || base + (uint64)len * PGSIZE > p->sz)
+    return -1;
+
+  int nbytes = (len + 7) / 8;
+  memset(bits, 0, nbytes);
+
+  for (int i = 0; i < len; i++) {
+    pte_t *pte = walk(p->pagetable, base + (uint64)i * PGSIZE, 0);
+    if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
+      return -1; // page not mapped
+    if (*pte & PTE_A) {
+      bits[i / 8] |= (1 << (i % 8));
+      *pte &= ~PTE_A; // clear, so the next call sees only new accesses
+    }
+  }
+
+  if (copyout(p->pagetable, p->sz, mask, (char *)bits, nbytes) < 0)
+    return -1;
+  return 0;
+}
+#endif
 
 uint64
 sys_kill(void)
@@ -138,4 +196,44 @@ sys_sigreturn(void)
   // syscall() stores our return value in a0,
   // so return the interrupted code's a0.
   return p->trapframe->a0;
+}
+#ifdef LAB_LOCK
+uint64
+sys_cpupin(void)
+{
+  struct proc *p = myproc();
+  int cpu;
+
+  argint(0, &cpu);
+  if (cpu < 0 || cpu >= NCPU)
+    return -1;
+  acquire(&p->lock);
+  p->pincpu = &cpus[cpu];
+  release(&p->lock);
+  return 0;
+}
+#endif
+uint64
+sys_interpose(void)
+{
+  int mask;
+  char path[MAXPATH];
+  struct proc *p = myproc();
+
+  argint(0, &mask);
+  if (argstr(1, path, MAXPATH) < 0)
+    return -1;
+
+  // once sandboxed, a process cannot weaken its own restrictions
+  if (p->interpose_mask != 0)
+    return -1;
+
+  p->interpose_mask = mask;
+  safestrcpy(p->interpose_path, path, MAXPATH);
+  return 0;
+}
+uint64
+sys_freemem(void)
+{
+  return free_mem_bytes();
 }

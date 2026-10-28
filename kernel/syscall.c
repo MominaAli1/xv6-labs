@@ -6,6 +6,9 @@
 #include "proc.h"
 #include "syscall.h"
 #include "defs.h"
+#include "fs.h"
+#include "sleeplock.h"
+#include "file.h"
 
 // Fetch the uint64 at addr from the current process.
 int
@@ -106,6 +109,24 @@ extern uint64 sys_sync(void);
 extern uint64 sys_sigalarm(void);
 extern uint64 sys_sigreturn(void);
 
+#ifdef LAB_NET
+extern uint64 sys_bind(void);
+extern uint64 sys_unbind(void);
+extern uint64 sys_send(void);
+extern uint64 sys_recv(void);
+#endif
+#ifdef LAB_PGTBL
+extern uint64 sys_pgpte(void);
+extern uint64 sys_vmprint(void);
+extern uint64 sys_pgaccess(void);
+extern uint64 sys_ksupernpte(void);
+#endif
+#ifdef LAB_LOCK
+extern uint64 sys_cpupin(void);
+#endif
+
+extern uint64 sys_freemem(void);
+extern uint64 sys_interpose(void);
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
 static uint64 (*syscalls[])(void) = {
@@ -134,19 +155,52 @@ static uint64 (*syscalls[])(void) = {
   [SYS_sync]    = sys_sync,
   [SYS_sigalarm]  = sys_sigalarm,
   [SYS_sigreturn] = sys_sigreturn,
+#ifdef LAB_NET
+  [SYS_bind] = sys_bind,
+  [SYS_unbind] = sys_unbind,
+  [SYS_send] = sys_send,
+  [SYS_recv] = sys_recv,
+#endif
+#ifdef LAB_PGTBL
+  [SYS_pgpte] = sys_pgpte,
+  [SYS_vmprint] = sys_vmprint,
+  [SYS_pgaccess] = sys_pgaccess,
+  [SYS_ksupernpte] = sys_ksupernpte,
+#endif
+#ifdef LAB_LOCK
+  [SYS_rwlktest] = sys_rwlktest,
+  [SYS_cpupin] = sys_cpupin,
+#endif
+  [SYS_interpose] = sys_interpose,
+[SYS_freemem] = sys_freemem,
   // clang-format on
 };
 
+
 void
 syscall(void)
+
 {
   int num;
   struct proc *p = myproc();
 
   num = p->trapframe->a7;
   if (num > 0 && num < NELEM(syscalls) && syscalls[num]) {
-    // Use num to lookup the system call function for num, call it,
-    // and store its return value in p->trapframe->a0
+        if (p->interpose_mask & (1 << num)) {
+      int allowed = 0;
+      if (num == SYS_open || num == SYS_exec) {
+        char path[MAXPATH];
+        if (argstr(0, path, MAXPATH) >= 0 &&
+            strncmp(path, p->interpose_path, MAXPATH) == 0) {
+          allowed = 1;
+        }
+      }
+      if (!allowed) {
+        p->trapframe->a0 = -1;
+        return;
+      }
+    
+    }
     p->trapframe->a0 = syscalls[num]();
   } else {
     printk("%d %s: unknown sys call %d\n", p->pid, p->name, num);

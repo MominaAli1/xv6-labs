@@ -96,7 +96,8 @@ struct proc {
   uint64 kstack;               // Virtual address of kernel stack
   uint64 sz;                   // Size of process memory (bytes)
   pagetable_t pagetable;       // User page table
-  struct trapframe *trapframe; // data page for trampoline.S
+  struct trapframe *trapframe; 
+    struct usyscall *usyscall;   // page shared read-only with user (USYSCALL)// data page for trampoline.S
   struct context context;      // swtch() here to run process
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
@@ -108,4 +109,7 @@ struct proc {
   int alarm_ticks;                  // ticks since last alarm
   int alarm_running;                // handler is executing
   struct trapframe alarm_trapframe; // user registers to restore
+  char name[16];  
+  int interpose_mask;     
+  char interpose_path[MAXPATH];   // the one path open/exec may still use         // syscalls this process is sandboxed from             // Process name (debugging)
 };

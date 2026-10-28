@@ -1,0 +1,15 @@
+1. usertrap() (in kernel/trap.c) called syscall().
+
+2. p->trapframe->a7 = 0xf (15) = SYS_open. a7 holds the system call
+   number, telling the kernel which syscall to run. Here init is
+   opening the console.
+
+3. The previous mode was User mode (the SPP bit in sstatus is 0).
+
+4. The faulting instruction is: lw a3,0(zero). Register a3 holds num.
+
+5. The kernel crashes because address 0 is not mapped in the kernel's
+   page table, so loading from it causes a load page fault. This is
+   confirmed by scause=0xd (13 = load page fault).
+
+6. The running process was init, with pid 1.

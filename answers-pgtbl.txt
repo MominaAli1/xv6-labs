@@ -1,0 +1,40 @@
+Permission bits: V=0x1 R=0x2 W=0x4 X=0x8 U=0x10 G=0x20 A=0x40 D=0x80
+
+Q1. print_pgtbl entries
+va 0x0      perm 0x5B (V R X U A)   : user text/code page (already executed, so A is set)
+va 0x1000   perm 0x1B (V R X U)     : second text page (read-only data/code)
+va 0x2000   perm 0x17 (V R W U)     : user data/bss page
+va 0x3000   perm 0x07 (V R W, no U) : stack guard page; user access faults
+va 0x4000   perm 0xD7 (V R W U A D) : user stack (read and written)
+va 0x5000-0x9000 pte 0             : unmapped, the heap has not grown there
+va 0x3FFFFF6000-0x3FFFFFC000 pte 0 : unmapped gap below the special pages
+va 0x3FFFFFD000 perm 0x13 (V R U)   : USYSCALL page (struct usyscall with pid), user read-only
+va 0x3FFFFFE000 perm 0xC7 (V R W A D, no U): TRAPFRAME, kernel only
+va 0x3FFFFFF000 perm 0x4B (V R X A, no U)  : TRAMPOLINE, pa 0x80007000 is the
+             kernel's trampoline code, the same physical page in every process
+Virtual pages are not contiguous in physical memory because kalloc()
+hands out whatever free page is on its free list.
+
+Q2. vmprint leaf pages
+The root has entries 0 and 255. Entry 0 leads to the low user pages
+(0x0 RXU text, 0x1000 RXU text, 0x2000 RWU data, 0x3000 RW guard page
+without U, 0x4000 RWU stack). Entry 255 leads to the top of the address
+space: 0x3fffffd000 RU (USYSCALL), 0x3fffffe000 RW (trapframe, no U),
+0x3ffffff000 RX (trampoline, no U). Without U the user cannot touch a page.
+Without W it cannot be written, and without X it cannot be executed.
+These are the same leaf PTEs that print_pgtbl showed; vmprint also
+shows the two levels of page-table pages above them.
+
+Q3. Other system calls that could use the shared page
+uptime(): the kernel could write ticks into the shared page on each timer
+tick, so user space just reads it. sbrk(0) / the process size could also
+be published there, as could getppid() if xv6 had it. This works for any
+call that only reads small kernel state, with no side effects.
+
+Q4. Superpages
+The kernel page table uses 95 superpage PTEs: 32 for the PLIC
+(64MB at 0x0c000000) and 63 for RAM from 0x80200000 to PHYSTOP
+(0x88000000). Kernel text (0x80000000-0x80008000) and the rest of
+the first 2MB use 4KB pages because etext is not 2MB-aligned.
+Each superpage replaces one bottom-level page-table page of 512 PTEs,
+so this saves 95 page-table pages (95*512 = 48,640 leaf PTEs).
