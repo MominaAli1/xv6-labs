@@ -109,7 +109,6 @@ struct proc {
   int alarm_ticks;                  // ticks since last alarm
   int alarm_running;                // handler is executing
   struct trapframe alarm_trapframe; // user registers to restore
-  char name[16];  
   int interpose_mask;     
   char interpose_path[MAXPATH];   // the one path open/exec may still use         // syscalls this process is sandboxed from             // Process name (debugging)
 };
