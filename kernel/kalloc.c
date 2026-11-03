@@ -23,10 +23,19 @@ struct {
   struct run *freelist;
 } kmem;
 
+// copy-on-write: how many page tables (or kernel users) refer to
+// each physical page. indexed by (pa - KERNBASE) / PGSIZE.
+#define PA2REF(pa) (((uint64)(pa) - KERNBASE) / PGSIZE)
+struct {
+  struct spinlock lock;
+  int count[(PHYSTOP - KERNBASE) / PGSIZE];
+} kref;
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&kref.lock, "kref");
   freerange(end, (void *)PHYSTOP);
 }
 
@@ -35,8 +44,29 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char *)PGROUNDUP((uint64)pa_start);
-  for (; p + PGSIZE <= (char *)pa_end; p += PGSIZE)
+  for (; p + PGSIZE <= (char *)pa_end; p += PGSIZE) {
+    kref.count[PA2REF(p)] = 1; // kfree() drops it to 0
     kfree(p);
+  }
+}
+
+// one more page table now refers to page pa (COW fork).
+void
+krefinc(void *pa)
+{
+  acquire(&kref.lock);
+  kref.count[PA2REF(pa)]++;
+  release(&kref.lock);
+}
+
+// how many references page pa has.
+int
+krefcount(void *pa)
+{
+  acquire(&kref.lock);
+  int n = kref.count[PA2REF(pa)];
+  release(&kref.lock);
+  return n;
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -50,6 +80,15 @@ kfree(void *pa)
 
   if (((uint64)pa % PGSIZE) != 0 || (char *)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
+
+  // drop one reference; only free the page when none are left.
+  acquire(&kref.lock);
+  if (kref.count[PA2REF(pa)] <= 0)
+    panic("kfree: refcount");
+  int left = --kref.count[PA2REF(pa)];
+  release(&kref.lock);
+  if (left > 0)
+    return;
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
@@ -76,7 +115,11 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if (r)
+  if (r) {
+    acquire(&kref.lock);
+    kref.count[PA2REF(r)] = 1; // the caller holds the only reference
+    release(&kref.lock);
     memset((char *)r, 5, PGSIZE); // fill with junk
+  }
   return (void *)r;
 }
