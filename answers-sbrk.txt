@@ -1,0 +1,26 @@
+Exercise: sbrk(1) and the page table (run of user/sbrkpt.c)
+
+Before sbrk(1) the process size was 0x5000 (page-aligned) and
+virtual page 0x5000 was not mapped (PTE 0).
+
+How much space has the kernel allocated?
+sbrk(1) asks for 1 byte, but xv6 allocates whole pages. sbrk()
+(eager) calls growproc() -> uvmalloc(), which rounds up to page
+boundaries: it allocated ONE full 4096-byte physical page with
+kalloc(), zeroed it, and mapped it at virtual address 0x5000.
+The process size p->sz became 0x5001. No new page-table pages
+were needed, because the existing bottom-level page-table page
+already covers address 0x5000. A second sbrk(1) allocated nothing:
+the byte at 0x5001 is in the same, already-mapped page.
+
+What does the PTE for the new memory contain?
+In my run: pte 0x21FE0817 -> physical page 0x87F82000, flags 0x17
+= V | R | W | U: valid, readable, writable, user-accessible, and
+not executable (no X). The physical page number (pa >> 12) sits in
+bits 10 and up of the PTE; the flags are the low 10 bits.
+After the program wrote the byte, the hardware set the A (accessed)
+and D (dirty) bits: flags became 0xD7.
+
+For comparison, sbrklazy() only increases p->sz: the page stays
+unmapped until the program touches it; then the page-fault handler
+(vmfault) allocates and maps it with the same RWU permissions.
