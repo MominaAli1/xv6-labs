@@ -17,6 +17,8 @@ extern char etext[]; // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+static uint64 cowcopy(pagetable_t, uint64);
+
 // Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
@@ -301,22 +303,22 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for (i = 0; i < sz; i += PGSIZE) {
     if ((pte = walk(old, i, 0)) == 0)
       continue; // page table entry hasn't been allocated
     if ((*pte & PTE_V) == 0)
       continue; // physical page hasn't been allocated
+    // copy-on-write: don't copy the page; share it with the child.
+    // writable pages become read-only + COW in both parent and child,
+    // so the first write to them faults and makes a private copy.
+    if (*pte & PTE_W)
+      *pte = (*pte & ~PTE_W) | PTE_COW;
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if ((mem = kalloc()) == 0)
+    if (mappages(new, i, PGSIZE, pa, flags) != 0)
       goto err;
-    memmove(mem, (char *)pa, PGSIZE);
-    if (mappages(new, i, PGSIZE, (uint64)mem, flags) != 0) {
-      kfree(mem);
-      goto err;
-    }
+    krefinc((void *)pa);
   }
   return 0;
 
@@ -359,7 +361,13 @@ copyout(pagetable_t pagetable, uint64 psz, uint64 dstva, char *src, uint64 len)
       }
     }
 
-    pte = walk(pagetable, va0, 0);
+    if ((pte = walk(pagetable, va0, 0)) == 0)
+      return -1;
+    // copy-on-write page: make this process's own copy first.
+    if (*pte & PTE_COW) {
+      if ((pa0 = cowcopy(pagetable, va0)) == 0)
+        return -1;
+    }
     // forbid copyout over read-only user text pages.
     if ((*pte & PTE_W) == 0)
       return -1;
@@ -451,6 +459,35 @@ copyinstr(pagetable_t pagetable, uint64 psz, char *dst, uint64 srcva,
   }
 }
 
+// handle a write to copy-on-write page va: give this process its
+// own writable copy, or, if no other page table shares the page,
+// just make it writable again. returns the page's physical address,
+// or 0 if va isn't a COW page or there's no free memory.
+static uint64
+cowcopy(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte = walk(pagetable, va, 0);
+  if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
+      (*pte & PTE_COW) == 0)
+    return 0;
+
+  uint64 pa = PTE2PA(*pte);
+  uint flags = (PTE_FLAGS(*pte) & ~PTE_COW) | PTE_W;
+
+  if (krefcount((void *)pa) == 1) {
+    *pte = PA2PTE(pa) | flags; // last user of the page: no copy needed
+    return pa;
+  }
+
+  char *mem = kalloc();
+  if (mem == 0)
+    return 0; // out of memory: the caller kills the process
+  memmove(mem, (char *)pa, PGSIZE);
+  *pte = PA2PTE(mem) | flags;
+  kfree((void *)pa); // drop this page table's reference to the shared page
+  return (uint64)mem;
+}
+
 // allocate and map user memory if process is referencing a page
 // that was lazily allocated in sys_sbrk().
 // returns 0 if va is invalid or already mapped, or if
@@ -464,7 +501,10 @@ vmfault(pagetable_t pagetable, uint64 psz, uint64 va, int read)
     return 0;
   va = PGROUNDDOWN(va);
   if (ismapped(pagetable, va)) {
-    return 0;
+    // a write to a copy-on-write page?
+    if (read)
+      return 0;
+    return cowcopy(pagetable, va);
   }
   mem = (uint64)kalloc();
   if (mem == 0)
