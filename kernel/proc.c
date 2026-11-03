@@ -287,6 +287,14 @@ kfork(void)
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
 
+  // the child gets the same mmap-ed regions; its pages are
+  // read from the file again when it first touches them.
+  for (i = 0; i < NVMA; i++) {
+    np->vmas[i] = p->vmas[i];
+    if (p->vmas[i].used)
+      filedup(p->vmas[i].f);
+  }
+
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
@@ -329,6 +337,9 @@ kexit(int status)
 
   if (p == initproc)
     panic("init exiting");
+
+  // unmap mmap-ed regions, writing back modified MAP_SHARED pages.
+  munmapall(p, p->pagetable);
 
   // Close all open files.
   for (int fd = 0; fd < NOFILE; fd++) {
