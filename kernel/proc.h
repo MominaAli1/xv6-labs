@@ -79,6 +79,18 @@ struct trapframe {
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
+// a memory-mapped region of a file, created by mmap().
+#define NVMA 16
+struct vma {
+  int used;
+  uint64 addr;    // start address (page-aligned)
+  uint64 len;     // length in bytes (multiple of PGSIZE)
+  int prot;       // PROT_READ, PROT_WRITE
+  int flags;      // MAP_SHARED or MAP_PRIVATE
+  struct file *f; // the mapped file (holds a reference)
+  uint64 off;     // file offset that addr corresponds to
+};
+
 struct proc {
   struct spinlock lock;
 
@@ -101,4 +113,5 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct vma vmas[NVMA];       // mmap-ed regions
 };

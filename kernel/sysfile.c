@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -527,4 +528,205 @@ sys_pipe(void)
     return -1;
   }
   return 0;
+}
+
+//
+// mmap and munmap.
+//
+
+// the mmap-ed region that contains address va, or 0.
+static struct vma *
+vmafind(struct proc *p, uint64 va)
+{
+  for (int i = 0; i < NVMA; i++) {
+    struct vma *v = &p->vmas[i];
+    if (v->used && va >= v->addr && va < v->addr + v->len)
+      return v;
+  }
+  return 0;
+}
+
+uint64
+sys_mmap(void)
+{
+  uint64 len, off;
+  int prot, flags;
+  struct file *f;
+  struct proc *p = myproc();
+
+  // argument 0 (addr) is always 0: the kernel picks the address.
+  argaddr(1, &len);
+  argint(2, &prot);
+  argint(3, &flags);
+  argaddr(5, &off);
+  if (argfd(4, 0, &f) < 0)
+    return -1;
+
+  if (len == 0 || off % PGSIZE != 0 || f->type != FD_INODE)
+    return -1;
+  if (flags != MAP_SHARED && flags != MAP_PRIVATE)
+    return -1;
+  if ((prot & PROT_READ) && !f->readable)
+    return -1;
+  // a shared writable mapping writes to the file, so the file must be
+  // open for writing. a private one is never written back.
+  if ((prot & PROT_WRITE) && flags == MAP_SHARED && !f->writable)
+    return -1;
+
+  // put the new region just below the lowest existing one
+  // (or below the trapframe if there are none).
+  struct vma *v = 0;
+  uint64 top = TRAPFRAME;
+  for (int i = 0; i < NVMA; i++) {
+    if (p->vmas[i].used) {
+      if (p->vmas[i].addr < top)
+        top = p->vmas[i].addr;
+    } else if (v == 0) {
+      v = &p->vmas[i];
+    }
+  }
+  len = PGROUNDUP(len);
+  if (v == 0 || len == 0 || top < len || top - len < PGROUNDUP(p->sz))
+    return -1;
+
+  // lazy: don't allocate memory or read the file now.
+  // mmapfault() does that when a page is first used.
+  v->used = 1;
+  v->addr = top - len;
+  v->len = len;
+  v->prot = prot;
+  v->flags = flags;
+  v->off = off;
+  v->f = filedup(f);
+  return v->addr;
+}
+
+// write page va (physical page pa) of MAP_SHARED region v back
+// to the file, without growing the file.
+static void
+vmawriteback(struct vma *v, uint64 va, uint64 pa)
+{
+  struct inode *ip = v->f->ip;
+  uint off = v->off + (va - v->addr);
+  int max = ((MAXOPBLOCKS - 1 - 1 - 2) / 2) * BSIZE; // as in filewrite()
+  int done = 0;
+
+  while (done < PGSIZE) {
+    int n = 0;
+    begin_op();
+    ilock(ip);
+    if (off + done < ip->size) {
+      n = ip->size - (off + done);
+      if (n > PGSIZE - done)
+        n = PGSIZE - done;
+      if (n > max)
+        n = max;
+      writei(ip, 0, pa + done, off + done, n);
+    }
+    iunlock(ip);
+    end_op();
+    if (n <= 0)
+      break;
+    done += n;
+  }
+}
+
+// unmap [addr, addr+len) of region v, writing back pages of a
+// MAP_SHARED region that were modified (PTE_D). the range is at
+// the start or the end of v.
+static void
+vmaunmap(struct vma *v, pagetable_t pagetable, uint64 addr, uint64 len)
+{
+  for (uint64 va = addr; va < addr + len; va += PGSIZE) {
+    pte_t *pte = walk(pagetable, va, 0);
+    if (pte == 0 || (*pte & PTE_V) == 0)
+      continue; // never used, so never mapped
+    if ((v->flags & MAP_SHARED) && (*pte & PTE_D))
+      vmawriteback(v, va, PTE2PA(*pte));
+    uvmunmap(pagetable, va, 1, 1);
+  }
+
+  if (addr == v->addr) {
+    v->addr += len;
+    v->off += len;
+  }
+  v->len -= len;
+  if (v->len == 0) {
+    fileclose(v->f);
+    v->used = 0;
+  }
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr, len;
+  struct proc *p = myproc();
+
+  argaddr(0, &addr);
+  argaddr(1, &len);
+  if (addr % PGSIZE != 0 || len == 0)
+    return -1;
+  len = PGROUNDUP(len);
+
+  struct vma *v = vmafind(p, addr);
+  if (v == 0 || addr + len > v->addr + v->len)
+    return -1;
+  // only unmapping at the start or the end of a region is supported.
+  if (addr != v->addr && addr + len != v->addr + v->len)
+    return -1;
+
+  vmaunmap(v, p->pagetable, addr, len);
+  return 0;
+}
+
+// unmap all of p's regions (called by exit and exec).
+void
+munmapall(struct proc *p, pagetable_t pagetable)
+{
+  for (int i = 0; i < NVMA; i++) {
+    struct vma *v = &p->vmas[i];
+    if (v->used)
+      vmaunmap(v, pagetable, v->addr, v->len);
+  }
+}
+
+// page fault at va. if va is in an mmap-ed region and the access is
+// allowed, read that page of the file into a new page and map it.
+// returns the physical address, or 0 (the process is then killed).
+uint64
+mmapfault(struct proc *p, uint64 va, int read)
+{
+  struct vma *v = vmafind(p, va);
+  if (v == 0)
+    return 0;
+  if (read && !(v->prot & PROT_READ))
+    return 0;
+  if (!read && !(v->prot & PROT_WRITE))
+    return 0; // e.g. a write to a PROT_READ mapping
+
+  va = PGROUNDDOWN(va);
+  if (ismapped(p->pagetable, va))
+    return 0;
+
+  char *mem = kalloc();
+  if (mem == 0)
+    return 0;
+  memset(mem, 0, PGSIZE); // bytes past the end of the file read as 0
+
+  struct inode *ip = v->f->ip;
+  ilock(ip);
+  readi(ip, 0, (uint64)mem, v->off + (va - v->addr), PGSIZE);
+  iunlock(ip);
+
+  int perm = PTE_U | PTE_R;
+  if (v->prot & PROT_WRITE)
+    perm |= PTE_W;
+  if (v->prot & PROT_EXEC)
+    perm |= PTE_X;
+  if (mappages(p->pagetable, va, PGSIZE, (uint64)mem, perm) != 0) {
+    kfree(mem);
+    return 0;
+  }
+  return (uint64)mem;
 }
