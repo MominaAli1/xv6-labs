@@ -188,6 +188,7 @@ mkfs/mkfs: mkfs/mkfs.c $K/fs.h $K/param.h
 .PRECIOUS: %.o
 
 UPROGS=\
+	$U/_symlinktest\
 	$U/_cat\
 	$U/_echo\
 	$U/_forktest\

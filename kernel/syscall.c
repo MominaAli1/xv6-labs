@@ -102,6 +102,7 @@ extern uint64 sys_unlink(void);
 extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
+extern uint64 sys_symlink(void);
 extern uint64 sys_sync(void);
 
 // An array mapping syscall numbers from syscall.h
@@ -129,6 +130,7 @@ static uint64 (*syscalls[])(void) = {
   [SYS_link]    = sys_link,
   [SYS_mkdir]   = sys_mkdir,
   [SYS_close]   = sys_close,
+[SYS_symlink] = sys_symlink,
   [SYS_sync]    = sys_sync,
   // clang-format on
 };
